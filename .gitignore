@@ -1,0 +1,21 @@
+*.iml
+.gradle
+.kotlin
+/local.properties
+/.idea
+.DS_Store
+/build
+/app/build
+/captures
+.externalNativeBuild
+.cxx
+
+# The native daemon is COMPILED from the phinet Rust source by
+# ./build-android.sh — it's a build output, not source. Committing the
+# prebuilt .so would mean anyone cloning this repo runs an anonymity daemon
+# they didn't build and can't check against the source. Build it instead.
+/app/src/main/jniLibs/
+
+# Keep the Gradle wrapper — it's how a fresh clone builds with the right
+# Gradle version. (Many templates ignore *.jar and silently drop it.)
+!gradle/wrapper/gradle-wrapper.jar

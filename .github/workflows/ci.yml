@@ -1,0 +1,37 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { path: phinet-android }
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/phinet-main
+          path: phinet-main
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: "17" }
+
+      - name: Install Rust + Android targets
+        run: |
+          rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android
+          cargo install cargo-ndk --locked
+
+      # The app won't build without the daemon: jniLibs is a build output, not
+      # source, so CI has to cross-compile it the same way a contributor does.
+      - name: Cross-compile the daemon
+        working-directory: phinet-android
+        run: |
+          echo "y" | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;26.3.11579264"
+          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/26.3.11579264"
+          ./build-android.sh "$GITHUB_WORKSPACE/phinet-main"
+
+      - name: Build APK
+        working-directory: phinet-android
+        run: ./gradlew --no-daemon :app:assembleDebug

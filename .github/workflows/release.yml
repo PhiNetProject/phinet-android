@@ -1,0 +1,131 @@
+name: release
+
+# Tag a version to cut a release:  git tag v0.1.0 && git push --tags
+#
+# Produces, for people who'd rather download than build:
+#   * phinet-<tag>.apk         — the app, with the daemon inside
+#   * libphinetdaemon-<abi>.so — the node binaries on their own
+#   * SHA256SUMS               — so a local build can be compared
+#
+# The .so files aren't in the repo on purpose (an anonymity daemon you didn't
+# build is a daemon you're trusting blindly). This job builds them from the
+# phinet Rust source at a pinned ref, so what ships is reproducible from
+# public source rather than from someone's laptop.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      daemon_ref:
+        description: "phinet-main ref to build the daemon from"
+        default: "main"
+
+env:
+  NDK_VERSION: "26.3.11579264"
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write        # needed to create the release
+    steps:
+      - name: Check out the app
+        uses: actions/checkout@v4
+        with:
+          path: phinet-android
+
+      # The app and the daemon live in separate repos; build-android.sh takes
+      # the daemon workspace as an argument.
+      - name: Check out the daemon source
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/phinet-main
+          ref: ${{ inputs.daemon_ref || 'main' }}
+          path: phinet-main
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install Rust + Android targets
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android
+          cargo install cargo-ndk --locked
+
+      - name: Install NDK
+        run: |
+          echo "y" | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;${NDK_VERSION}"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
+
+      - name: Cross-compile the daemon
+        working-directory: phinet-android
+        run: ./build-android.sh "$GITHUB_WORKSPACE/phinet-main"
+
+      # Signing is optional: without a keystore secret the release APK can't
+      # be installed, so fall back to a debug-signed one and say so.
+      - name: Decode signing keystore
+        id: keystore
+        if: ${{ env.KEYSTORE_B64 != '' }}
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          echo "path=$RUNNER_TEMP/release.jks" >> "$GITHUB_OUTPUT"
+
+      - name: Build APK
+        working-directory: phinet-android
+        env:
+          PHINET_KEYSTORE: ${{ steps.keystore.outputs.path }}
+          PHINET_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          PHINET_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          PHINET_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -n "${PHINET_KEYSTORE:-}" ]; then
+            ./gradlew --no-daemon :app:assembleRelease
+            echo "APK=app/build/outputs/apk/release/app-release.apk" >> "$GITHUB_ENV"
+          else
+            echo "::warning::No signing keystore configured — shipping a debug-signed APK."
+            ./gradlew --no-daemon :app:assembleDebug
+            echo "APK=app/build/outputs/apk/debug/app-debug.apk" >> "$GITHUB_ENV"
+          fi
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p out
+          TAG="${GITHUB_REF_NAME:-dev}"
+          cp "phinet-android/$APK" "out/phinet-${TAG}.apk"
+          for abi in arm64-v8a armeabi-v7a x86_64; do
+            cp "phinet-android/app/src/main/jniLibs/$abi/libphinetdaemon.so" \
+               "out/libphinetdaemon-${abi}.so"
+          done
+          cd out && sha256sum * > SHA256SUMS && cat SHA256SUMS
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: out/*
+          fail_on_unmatched_files: true
+          body: |
+            Build these yourself if you'd rather not trust this one:
+
+                git clone https://github.com/${{ github.repository_owner }}/phinet-main
+                git clone https://github.com/${{ github.repository }}
+                cd phinet-android
+                export ANDROID_NDK_HOME=~/Android/Sdk/ndk/${{ env.NDK_VERSION }}
+                ./build-android.sh ../phinet-main
+                ./gradlew :app:assembleDebug
+
+            `SHA256SUMS` covers the `.so` files, so a local cross-compile can be
+            compared against what shipped here. The APK hash won't match a local
+            build — signatures and timestamps differ.
+
+            ΦNET's anonymity depends on independent relay operators. If you have a
+            machine with a reachable address, please run one.
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: phinet-android
+          path: out/*

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The embedded daemon serves its com API + ctl on loopback (127.0.0.1).
+     The consensus is fetched over plain HTTP from the backbone (signed, so
+     integrity doesn't need TLS). Allow cleartext to loopback and the
+     backbone hosts. -->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">127.0.0.1</domain>
+        <domain includeSubdomains="true">localhost</domain>
+        <domain includeSubdomains="true">phinetproject.com</domain>
+        <domain includeSubdomains="true">lobarcs.com</domain>
+        <domain includeSubdomains="true">libraryofaletheia.com</domain>
+    </domain-config>
+</network-security-config>

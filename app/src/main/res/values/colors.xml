@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="phi_bg">#0B1220</color>
+    <color name="phi_surface">#111C2E</color>
+    <color name="phi_primary">#6366F1</color>
+    <color name="phi_accent">#22D3EE</color>
+    <color name="ic_launcher_background">#0B1220</color>
+</resources>
